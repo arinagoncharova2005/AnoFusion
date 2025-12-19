@@ -1,0 +1,5 @@
+data/*.csv
+data_old/*.csv
+1 AnoFusion.pdf
+update_linear_interpolation_data/
+report_1.md

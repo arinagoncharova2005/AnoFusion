@@ -1,0 +1,6 @@
+2025-06-22 21:57:45,000 - /Users/arinagoncharova/Documents/diploma/AnoFusion/utils/main.py[line:234] - INFO: ('epoch:', '0', 'loss:', '0.000617932921972523')
+2025-12-08 07:35:16,692 - /Users/arinagoncharova/Documents/diploma/AnoFusion/utils/main.py[line:275] - INFO: ('epoch:', '0', 'loss:', '0.0013923772771186')
+2025-12-09 21:58:11,355 - /Users/arinagoncharova/Documents/diploma/AnoFusion/utils/main.py[line:304] - INFO: ('epoch:', '0', 'loss:', '0.0027948423512530606')
+2025-12-09 22:35:59,595 - /Users/arinagoncharova/Documents/diploma/AnoFusion/utils/main.py[line:304] - INFO: ('epoch:', '0', 'loss:', '0.05952345678621832')
+2025-12-15 03:51:30,099 - /Users/arinagoncharova/Documents/diploma/AnoFusion/utils/main.py[line:301] - INFO: ('epoch:', '0', 'loss:', '0.048371916525157994')
+2025-12-16 15:31:34,700 - /Users/arinagoncharova/Documents/diploma/AnoFusion/utils/main.py[line:301] - INFO: ('epoch:', '0', 'loss:', '0.00795369184357897')
