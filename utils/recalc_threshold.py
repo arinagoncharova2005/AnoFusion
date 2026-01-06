@@ -52,7 +52,7 @@ def main():
     print("Model loaded.")
 
     print(f"Calibrating threshold (quantile={args.quantile})...")
-    threshold = m.calibrate_threshold(train_loader, net, quantile=args.quantile)
+    threshold = m.calibrate_threshold(train_loader, net, incident_label_df=label_with_timestamp, quantile=args.quantile)
     if threshold is None:
         raise SystemExit("No threshold computed (no scores collected). Try smaller batch size.")
 
@@ -61,7 +61,6 @@ def main():
     with output_path.open("w") as f:
         json.dump({"threshold": float(threshold), "quantile": args.quantile}, f)
     print(f"Saved threshold {threshold:.6f} to {output_path}")
-
 
 if __name__ == "__main__":
     main()

@@ -94,9 +94,23 @@ def write_log_csv(service_s, name, temp, stru):
     stru['timestamp'] = stru['timestamp'].astype(int)
     print("stru:", stru)
     temp = temp[temp['EventTemplate'].notnull()]
-    temp = temp[temp['EventTemplate'].str.contains('INFO')]
+    temp = temp[temp['EventTemplate'].str.contains('INFO', na=False)]
     print("temp:", temp)
-    log_series = dict({i:[] for i in temp['EventTemplate'].values.tolist()})
+    use_clusters = 'ClusterId' in temp.columns and 'ClusterId' in stru.columns
+    if use_clusters:
+        temp = temp.dropna(subset=['ClusterId']).drop_duplicates(['ClusterId'])
+        temp = temp.copy()
+        temp['LogKey'] = temp['ClusterId'].astype(str)
+        stru = stru.copy()
+        stru['EventTemplate'] = stru['ClusterId'].astype(str)
+        key_col = 'LogKey'
+        print('Using ClusterId for log channels')
+    else:
+        key_col = 'EventTemplate'
+        print('Using EventTemplate for log channels')
+
+        
+    log_series = dict({i:[] for i in temp[key_col].values.tolist()})
     log_series['total_log_length'] = []
     num_cores = len(log_series.keys())
     pool = Pool(processes=num_cores)  # multi-threading
@@ -258,6 +272,15 @@ def write(service_s, store_path):
         df['timestamp'] = (df['timestamp'] / 1000).astype('int')
     else:
         df['timestamp'] = df['timestamp'].astype('int')
+
+    # aggregate by minutes
+    # df['timestamp'] = (df['timestamp']//60)*60
+    # if not isinstance(df, pd.DataFrame) or 'timestamp' not in df.columns:
+    #     print('df head')
+    #     print(df.head())
+    #     raise ValueError("Expected metrics dataframe with 'timestamp' column before grouping.")
+    # df = df.groupby('timestamp').mean(numeric_only=True).reset_index()
+    
     df = df.drop_duplicates(['timestamp'])
     print(df)
     df = df[(df['timestamp']>=config.start_time[service_s]) & (df['timestamp']<=config.end_time[service_s])]
@@ -287,8 +310,8 @@ def write(service_s, store_path):
     write_trace_json(service_s, service_s.split('_')[0] + '.json', trace)
     print("trace converted to json")
    
-    stru = pd.read_csv(data_path + service_s.split('_')[0] + '_stru.csv')
-    temp = pd.read_csv(data_path + service_s.split('_')[0] + '_temp.csv')
+    stru = pd.read_csv(data_path + service_s.split('_')[0] + '_stru_out.csv')
+    temp = pd.read_csv(data_path + service_s.split('_')[0] + '_temp_out.csv')
     print("stru.timestamp:", stru['timestamp'].values[0], stru['timestamp'].values[-1])
     write_log_csv(service_s, service_s.split('_')[0], temp, stru)
     print("logs to csv")

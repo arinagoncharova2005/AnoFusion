@@ -5,3 +5,7 @@ scikit-learn
 torch
 tqdm
 pyyaml
+torchvision
+transformers
+umap-learn
+matplotlib

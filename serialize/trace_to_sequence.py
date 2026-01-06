@@ -7,7 +7,9 @@ import datetime
 from collections import OrderedDict
 
 def trace_to_seq(df, start_time, end_time):
-    window_size = 1
+    # window_size = 1
+    window_size = 60
+    step_size = 60
     df = pd.DataFrame(df).copy()
     df['timestamp'] = pd.to_numeric(df['timestamp'], errors='coerce')
     df = df.dropna(subset=['timestamp'])
@@ -15,6 +17,8 @@ def trace_to_seq(df, start_time, end_time):
     trace_series = OrderedDict()
 
     for i in sorted(df['timestamp'].astype(int).unique()):
+    # collect by minute
+    # for i in range(int(start_time), int(end_time), step_size):
         trace_split_data = df[(df['timestamp']>=i) & (df['timestamp']<i+window_size)]
         span_data = []
         
