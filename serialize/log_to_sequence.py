@@ -5,9 +5,10 @@ def log_to_seq(key, templates, structure, start_time, end_time):
     print("structure:", structure.shape)
     print("structure.columns:", structure.columns)
     window_size = 60
+    step_size = 60
     series = []
-    
     for i in range(start_time, end_time):
+    # for i in range(start_time, end_time, step_size):
         print("i:", i)
         struct_eventTemplate = structure[(structure['timestamp']>=i) & 
                                          (structure['timestamp']<i+window_size)]

@@ -284,10 +284,11 @@ def main(
         incidents_df,
         pre_minutes=pre_minutes,
         thr=0.5,
-        smooth="3min",
-        min_len="2min",
-        merge_gap="3min",
-        cooldown="10min",
+        smooth=None, min_len=None, merge_gap=None, cooldown=None,
+        # smooth="3min",
+        # min_len="2min",
+        # merge_gap="3min",
+        # cooldown="10min",
         y_true=y_true,
     )
 

@@ -24,7 +24,7 @@ np.set_printoptions(suppress=True)
 # Prefer CUDA, then MPS (Apple), otherwise CPU.
 def select_device():
     if torch.cuda.is_available():
-        return torch.device("cuda:0")
+        return torch.device("cuda")
     if hasattr(torch.backends, "mps") and torch.backends.mps.is_available() and torch.backends.mps.is_built():
         return torch.device("mps")
     return torch.device("cpu")
@@ -94,10 +94,22 @@ def get_data(mode_name, matrix_store_path, proportion):
     channels = channels.values.T
     print("function get_data")
     print(channels)
+
+    # check for nans
+    if not np.isfinite(channels).all():
+        bad = np.where(~np.isfinite(channels))
+        raise ValueError(f"Found {len(bad[0])} NaNs in channels before normalization: {bad[:5]}")
+    
     channels = normalize(channels, axis=1, norm='max')
+
+    # check for nans
+    if not np.isfinite(channels).all():
+        bad = np.where(~np.isfinite(channels))
+        raise ValueError(f"Found {len(bad[0])} NaNs in channels after normalization: {bad[:5]}")
     
     matrix_file = join(store_nmiMatrix_path, matrix_store_path)
     need_recompute = True
+    # TO DO: раскомментить
     if os.path.exists(matrix_file):
         with open(matrix_file, 'rb') as f:
             nmiMatrix = pkl.load(f)
@@ -129,12 +141,15 @@ def compute_distance_scores(pred_np, label_np):
     return scores
 
 
-def calibrate_threshold(train_loader, net, quantile=0.99):
+def calibrate_threshold(train_loader, net, incident_label_df, quantile=0.99, pred_out='train_predictions.csv'):
     """Collect distances on train/val and pick a quantile as threshold."""
     net.eval()
     scores = []
+    preds = []
+    labels = []
+    timestamps = []
     with torch.no_grad():
-        for batch_label, batch_aj, batch_channel, _ in train_loader:
+        for batch_label, batch_aj, batch_channel, batch_timestamp in train_loader:
             X = batch_channel.float().to(cuda_device)
             A = batch_aj.float().to(cuda_device)
             y_true = batch_label.to(device=cuda_device, dtype=torch.float32)
@@ -142,8 +157,31 @@ def calibrate_threshold(train_loader, net, quantile=0.99):
             pred_np = output.cpu().numpy()
             label_np = y_true.cpu().numpy()
             scores.extend(compute_distance_scores(pred_np, label_np))
+            if pred_out:
+                preds.append(pred_np)
+                labels.append(label_np)
+                timestamps.append(batch_timestamp.cpu().numpy())
     if len(scores) == 0:
         return None
+    print('Saving model predictions on test')
+    ts = np.concatenate(timestamps, axis=0).astype("int64").reshape(-1)
+    # label_arr = np.concatenate(labels, axis=0)
+    # label_json = [json.dumps(row.tolist()) for row in label_arr]
+    incident_label = None
+    if incident_label_df is not None and "timestamp" in incident_label_df.columns and "label" in incident_label_df.columns:
+        label_series = pd.Series(
+            incident_label_df["label"].values,
+            index=pd.to_numeric(incident_label_df["timestamp"], errors="coerce").fillna(0).astype("int64"),
+        )
+        incident_label = pd.Series(ts).map(label_series).fillna(0).astype("int64").values
+    pd.DataFrame(
+        {
+            "timestamp": ts,
+            "distance": np.array(scores, dtype="float32"),
+            # "label": label_json,
+            "incident_label": incident_label
+        }
+    ).to_csv(pred_out, index=False)
     return float(np.quantile(scores, quantile))
 
 
@@ -172,10 +210,19 @@ def eval(label_with_timestamp, model_path, test_loader, threshold_path=None, thr
                 A = batch_aj
                 X = X.float().to(cuda_device)
                 A = A.float().to(cuda_device)
+
+                # check for nans
+                if not torch.isfinite(X).all():
+                    raise ValueError(f"Found NaNs in X: {torch.where(~torch.isfinite(X))}")
+                if not torch.isfinite(A).all():
+                    raise ValueError(f"Found NaNs in A: {torch.where(~torch.isfinite(A))}")
+                    
                 batch_label = batch_label.to(device=cuda_device, dtype=torch.float32)
                 label = np.array(
                     batch_label.squeeze().cpu().numpy(), dtype=np.double)
                 output = net(X, A)
+                if not torch.isfinite(output).all():
+                    raise ValueError(f"Found NaNs in output: {torch.where(~torch.isfinite(output))}")
                 pred = np.array(output.cpu().numpy(), dtype=np.double)
                 batch_timestamp = np.array(batch_timestamp.cpu().numpy())
                 for t in range(batch_timestamp.shape[0]):
@@ -232,6 +279,10 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', type=int, default=64, help='the batch_size of training')
     parser.add_argument('--window_size', type=int, default=20, help='the windowsize of data')
     parser.add_argument('--eval_limit', type=int, default=None, help='Limit number of eval samples for quick debug')
+    parser.add_argument('--early_stop_patience', type=int, default=5, help='epochs to wait for loss improvement before early stopping')
+    parser.add_argument('--early_stop_delta', type=float, default=0.0001, help='min loss improvement to reset patience')
+    
+    
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO,
@@ -246,12 +297,15 @@ if __name__ == '__main__':
         
     if args.mode == 'train':
         print('====================train===========================')
+        print(f'window_size={args.window_size}')
         channels_columns, label_with_timestamp, channels, nmiMatrix = get_data(
             'train', args.service_s+'train_nmiMatrix.pk', 0.6)
         print("Now channels shape:", channels.shape)
 
         train_data = MyTorchDataset(label_with_timestamp=label_with_timestamp,
                                             channels=channels, aj_matrix=nmiMatrix, window_size=args.window_size)
+
+        
         train_loader = DataLoader(dataset=train_data, batch_size=args.batch_size, shuffle=True, drop_last=True)
         dataset_length = int(len(train_data)/args.batch_size)
 
@@ -270,7 +324,9 @@ if __name__ == '__main__':
                 model_path = join(
                     join(checkpoint_path, f'model_save_v{i}'))
                 break
-
+                
+        best_loss = float('inf')
+        no_improve = 0
         for epoch in range(args.epoch_num):
             distance_frame = pd.DataFrame(
                 columns=['timetamp', 'distance', 'label'])
@@ -307,14 +363,26 @@ if __name__ == '__main__':
                     pbar.update(1)
 
             count += 1
-            logging.info(('epoch:', str(epoch), 'loss:', str(running_loss/count),))
+            # logging.info(('epoch:', str(epoch), 'loss:', str(running_loss/count),))
+            avg_loss = running_loss/count
+            logging.info(('epoch:', str(epoch), 'loss:', str(avg_loss),))
             scheduler.step(running_loss/count)
             torch.save(net, model_path + '/checkpoint_'+args.service_s+'_' +
-                        str(epoch) + '_' + str(running_loss/count)[:6]+'_model.pkl')
+                        str(epoch) + '_' + str(avg_loss)[:6]+'_model.pkl')
+            
+            # early stopping
+            if avg_loss < best_loss - args.early_stop_delta:
+                best_loss = avg_loss
+                no_improve = 0
+            else:
+                no_improve += 1
+                if no_improve >= args.early_stop_patience:
+                    print(f"Early stopping at epoch {epoch} with best loss = {best_loss}")
+                    break
 
         # Calibrate anomaly threshold on train data (quantile)
         calibr_loader = DataLoader(dataset=train_data, batch_size=args.batch_size, shuffle=False, drop_last=True)
-        threshold = calibrate_threshold(calibr_loader, net, quantile=0.99)
+        threshold = calibrate_threshold(calibr_loader, net, incident_label_df=label_with_timestamp, quantile=0.99)
         if threshold is not None:
             threshold_path = join(model_path, 'threshold.json')
             with open(threshold_path, 'w') as f:
@@ -333,10 +401,10 @@ if __name__ == '__main__':
         test_loader = DataLoader(
             dataset=test_data, batch_size=args.batch_size, shuffle=False, drop_last=False)
 
-        threshold_path = '../checkpoint/model_save_v8/threshold.json'
+        threshold_path = '../checkpoint/model_save_v0/threshold.json'
         eval(
             label_with_timestamp,
-            '../checkpoint/model_save_v8/checkpoint_mobservice2_0_0.0079_model.pkl',
+            '../checkpoint/model_save_v0/checkpoint_mobservice2_0_0.0055_model.pkl',
             test_loader,
             threshold_path=threshold_path,
             max_samples=args.eval_limit,

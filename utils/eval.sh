@@ -1,1 +1,1 @@
-python3 main.py --mode eval --service_s mobservice2
+python3 main.py --mode eval --service_s mobservice2 --window_size 1
